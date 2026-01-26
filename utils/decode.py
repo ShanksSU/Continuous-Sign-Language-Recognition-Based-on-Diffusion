@@ -2,10 +2,10 @@ import os
 import pdb
 import time
 import torch
-import ctcdecode
 import numpy as np
 from itertools import groupby
 import torch.nn.functional as F
+from pyctcdecode import build_ctcdecoder
 
 
 class Decode(object):
@@ -15,9 +15,10 @@ class Decode(object):
         self.num_classes = num_classes
         self.search_mode = search_mode
         self.blank_id = blank_id
-        vocab = [chr(x) for x in range(20000, 20000 + num_classes)]
-        self.ctc_decoder = ctcdecode.CTCBeamDecoder(vocab, beam_width=10, blank_id=blank_id,
-                                                    num_processes=10)
+        self.vocab = [chr(x) for x in range(20000, 20000 + num_classes)]
+        self.char2idx = {ch: i for i, ch in enumerate(self.vocab)}
+        ctc_vocab = self.vocab[1:] 
+        self.ctc_decoder = build_ctcdecoder(ctc_vocab)
 
     def decode(self, nn_output, vid_lgt, batch_first=True, probs=False):
         if not batch_first:
@@ -28,25 +29,35 @@ class Decode(object):
             return self.BeamSearch(nn_output, vid_lgt, probs)
 
     def BeamSearch(self, nn_output, vid_lgt, probs=False):
-        '''
-        CTCBeamDecoder Shape:
-                - Input:  nn_output (B, T, N), which should be passed through a softmax layer
-                - Output: beam_resuls (B, N_beams, T), int, need to be decoded by i2g_dict
-                          beam_scores (B, N_beams), p=1/np.exp(beam_score)
-                          timesteps (B, N_beams)
-                          out_lens (B, N_beams)
-        '''
         if not probs:
-            nn_output = nn_output.softmax(-1).cpu()
+            nn_output = nn_output.softmax(-1)
+
+        nn_output = torch.cat([nn_output[:, :, 1:], nn_output[:, :, 0:1]], dim=-1)
+
+        nn_output = nn_output.cpu()
         vid_lgt = vid_lgt.cpu()
-        beam_result, beam_scores, timesteps, out_seq_len = self.ctc_decoder.decode(nn_output, vid_lgt)
+        nn_output_np = nn_output.numpy()
+
+        batch_size = nn_output_np.shape[0]
         ret_list = []
-        for batch_idx in range(len(nn_output)):
-            first_result = beam_result[batch_idx][0][:out_seq_len[batch_idx][0]]
-            if len(first_result) != 0:
-                first_result = torch.stack([x[0] for x in groupby(first_result)])
-            ret_list.append([(self.i2g_dict[int(gloss_id)], idx) for idx, gloss_id in
-                             enumerate(first_result)])
+
+        for batch_idx in range(batch_size):
+            T = int(vid_lgt[batch_idx])
+            logits = nn_output_np[batch_idx, :T, :]
+            decoded_text = self.ctc_decoder.decode(logits)
+            index_seq = [self.char2idx[ch] for ch in decoded_text if ch in self.char2idx]
+
+            if len(index_seq) != 0:
+                index_tensor = torch.tensor(index_seq, dtype=torch.long)
+                index_tensor = torch.stack([x[0] for x in groupby(index_tensor)])
+            else:
+                index_tensor = []
+
+            ret_list.append([
+                (self.i2g_dict[int(gloss_id)], idx)
+                for idx, gloss_id in enumerate(index_tensor)
+            ])
+
         return ret_list
 
     def MaxDecode(self, nn_output, vid_lgt):
