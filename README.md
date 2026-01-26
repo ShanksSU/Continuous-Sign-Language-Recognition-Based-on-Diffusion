@@ -1,25 +1,25 @@
 ## Notification
-- This is experimental code to demonstrate the overall structure and realism of the framework. Due to the protection of the training data, the trained model will be published after the paper is received.
-- The sl_network.py shows the main structure of the model. Module.DiT.py shows the main structure of DDM. 
 
+This repository has undergone significant refactoring due to several critical issues found in the original implementation. During the development process, the following major discrepancies and bugs were identified and addressed:
+
+- Logical Inconsistencies & Redundancies: The original codebase contained various structural flaws, such as duplicate variable definitions (e.g., multiple instances of self.decode) which caused unpredictable behavior during execution.
+
+- Module Mismatch (RSM & GFE): There were severe discrepancies between the provided code and the theoretical implementation of the Recognition-oriented Supervision Module (RSM) and Gloss-level Feature Representation Enhancement (GFE). The logic in the original scripts did not align with the author's intended architectural design.
+
+- Dimensionality Conflicts: Critical bugs were found in the data flow, where input dimensions often failed to align, leading to runtime crashes during training and inference.
+
+To ensure the reliability and reproducibility of the project, these components have been heavily debugged and restructured. This fork serves as a corrected and more stable version of the original project.
 
 ## Prerequisites
 
-- This project is implemented in Pytorch (>1.8). Thus please install Pytorch first.
+**Docker**: Use the provided Dockerfile for a quick setup:
 
-- ctcdecode==0.4 [[parlance/ctcdecode]](https://github.com/parlance/ctcdecode)，for beam search decode.
+**Dependencies**: `pip install -r requirements.txt`
 
-- sclite [[kaldi-asr/kaldi]](https://github.com/kaldi-asr/kaldi), install kaldi tool to get sclite for evaluation. After installation, create a soft link toward the sclite: 
-  `mkdir ./software`
-  `ln -s PATH_TO_KALDI/tools/sctk-2.4.10/bin/sclite ./software/sclite`
-
-- [SeanNaren/warp-ctc](https://github.com/SeanNaren/warp-ctc) for ctc supervision.
-
-- You can install other required modules by conducting 
-   `pip install -r requirements.txt`
+**SCLite**: Run `bash install_kaldi_stack.sh`, then link the binary: 
+`ln -s /<PATH_TO_KALDI>/tools/sctk-2.4.10/bin/sclite ./software/sclite`
    
 ## Data Preparation
-You can choose any one of following datasets to verify the effectiveness of CorrNet.
 
 ### PHOENIX2014 dataset
 1. Download the RWTH-PHOENIX-Weather 2014 Dataset [[download link]](https://www-i6.informatik.rwth-aachen.de/~koller/RWTH-PHOENIX/). Our experiments based on phoenix-2014.v3.tar.gz.
@@ -58,7 +58,7 @@ You can choose any one of following datasets to verify the effectiveness of Corr
 
    ```bash
    cd ./preprocess
-   python data_preprocess-CSL.py --process-image --multiprocessing
+   python dataset_preprocess-CSL.py --process-image --multiprocessing
    ``` 
 
 ### CSL-Daily dataset
@@ -72,5 +72,13 @@ You can choose any one of following datasets to verify the effectiveness of Corr
 
    ```bash
    cd ./preprocess
-   python data_preprocess-CSL-Daily.py --process-image --multiprocessing
-   ```
+   python dataset_preprocess-CSL-Daily.py --process-image --multiprocessing
+   ``` 
+
+## Inference
+
+### Training
+
+The priorities of configuration files are: command line > config file > default values of argparse. To train the SLR model, run the command below:
+
+`python main.py --config ./config/baseline.yaml --device your_device`
