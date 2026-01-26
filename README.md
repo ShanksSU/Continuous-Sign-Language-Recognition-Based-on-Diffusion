@@ -18,7 +18,12 @@ To ensure the reliability and reproducibility of the project, these components h
 
 **SCLite**: Run `bash install_kaldi_stack.sh`, then link the binary: 
 `ln -s /<PATH_TO_KALDI>/tools/sctk-2.4.10/bin/sclite ./software/sclite`
-   
+
+**Pretrained Models**
+This project requires the MBart_trimmed model for initialization. You can obtain the weights and reference the configuration from the following repository:
+MBart_trimmed: [[GFSLT-VLP Repository]](https://www.google.com/search?q=https://github.com/zhoubenjia/GFSLT-VLP/tree/main/pretrain_models)<br>
+Please ensure the downloaded files are placed in the ./pretrain_models/MBart_trimmed directory.
+
 ## Data Preparation
 
 ### PHOENIX2014 dataset
