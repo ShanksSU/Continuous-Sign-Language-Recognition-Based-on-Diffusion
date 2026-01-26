@@ -1,15 +1,15 @@
 import os
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1'
 import pdb
 import sys
 import cv2
-cv2.ocl.setUseOpenCL(False)
-cv2.setNumThreads(0)
+# cv2.ocl.setUseOpenCL(False)
+# cv2.setNumThreads(0)
 import yaml
 import torch
-torch.set_num_threads(10)
+# torch.set_num_threads(10)
 import random
 import importlib
 import faulthandler
@@ -51,10 +51,11 @@ class Processor():
         self.device = utils.GpuDataParallel()
         self.recoder = utils.Recorder(self.arg.work_dir, self.arg.print_log, self.arg.log_interval)
         self.dataset = {}
-        self.data_loader = {}
+        self.data_loader = {} # NTCHW
         self.gloss_dict = np.load(self.arg.dataset_info['dict_path'], allow_pickle=True).item()
         self.arg.model_args['num_classes'] = len(self.gloss_dict) + 1
         self.model, self.optimizer = self.loading()
+
 
     def start(self):
         if self.arg.phase == 'train':
@@ -147,26 +148,18 @@ class Processor():
         elif self.arg.load_checkpoints:
             self.load_checkpoint_weights(model, optimizer)
         model = self.model_to_device(model)
-        # model = model.module
-        # optimizer = nn.DataParallel(optimizer, device_ids=self.device.gpu_list)
-        # optimizer = optimizer.module
         self.kernel_sizes = model.conv1d.kernel_size
         print("Loading model finished.")
         self.load_data()
+
         return model, optimizer
 
     def model_to_device(self, model):
         model = model.to(self.device.output_device)
-        # if len(self.device.gpu_list) > 1:
-            # raise ValueError(
-            #     "AMP equipped with DataParallel has to manually write autocast() for each forward function, you can choose to do this by yourself")
-            # model.conv2d = nn.DataParallel(model.conv2d, device_ids=self.device.gpu_list, output_device=self.device.output_device)
-            # model = nn.DataParallel(model, device_ids=self.device.gpu_list)
+        if len(self.device.gpu_list) > 1:
+            raise ValueError("AMP equipped with DataParallel has to manually write autocast() for each forward function, you can choose to do this by yourself")
+            #model.conv2d = nn.DataParallel(model.conv2d, device_ids=self.device.gpu_list, output_device=self.device.output_device)
         model = convert_model(model)
-        # if isinstance(model, torch.nn.DataParallel):
-        #     print("is")
-        # else:
-        #     print("no")
         model.cuda()
         return model
 
@@ -215,19 +208,18 @@ class Processor():
         if self.arg.dataset == 'CSL':
             dataset_list = zip(["train", "dev"], [True, False])
         elif 'phoenix' in self.arg.dataset:
-            dataset_list = zip(["train", "train_eval", "dev", "test"], [True, False, False, False])
+            dataset_list = zip(["train", "dev", "test"], [True, False, False]) 
         elif self.arg.dataset == 'CSL-Daily':
-            dataset_list = zip(["train", "train_eval", "dev", "test"], [True, False, False, False])
+            dataset_list = zip(["train", "dev", "test"], [True, False, False])
         for idx, (mode, train_flag) in enumerate(dataset_list):
             arg = self.arg.feeder_args
             arg["prefix"] = self.arg.dataset_info['dataset_root']
             arg["mode"] = mode.split("_")[0]
             arg["transform_mode"] = train_flag
-            self.dataset[mode] = self.feeder(gloss_dict=self.gloss_dict, kernel_size=self.kernel_sizes,
-                                             dataset=self.arg.dataset, **arg)
+            self.dataset[mode] = self.feeder(gloss_dict=self.gloss_dict, kernel_size= self.kernel_sizes, dataset=self.arg.dataset, **arg)
             self.data_loader[mode] = self.build_dataloader(self.dataset[mode], mode, train_flag)
         print("Loading data finished.")
-
+    
     def init_fn(self, worker_id):
         np.random.seed(int(self.arg.random_seed) + worker_id)
 
@@ -236,13 +228,12 @@ class Processor():
             dataset,
             batch_size=self.arg.batch_size if mode == "train" else self.arg.test_batch_size,
             shuffle=train_flag,
-            drop_last=True,
-            num_workers=self.arg.num_worker,
+            drop_last=train_flag,
+            num_workers=self.arg.num_worker,  # if train_flag else 0
             collate_fn=self.feeder.collate_fn,
             pin_memory=True,
             worker_init_fn=self.init_fn,
         )
-
 
 def import_class(name):
     components = name.rsplit('.', 1)
@@ -250,11 +241,10 @@ def import_class(name):
     mod = getattr(mod, components[1])
     return mod
 
-
 if __name__ == '__main__':
     sparser = utils.get_parser()
     p = sparser.parse_args()
-    # p.config = "baseline_iter.yaml"
+    # p.config = r"./configs/baseline.yaml"
     if p.config is not None:
         with open(p.config, 'r') as f:
             try:
@@ -272,5 +262,6 @@ if __name__ == '__main__':
     with open(f"./configs/{args.dataset}.yaml", 'r') as f:
         args.dataset_info = yaml.load(f, Loader=yaml.FullLoader)
     processor = Processor(args)
+    
     utils.pack_code("./", args.work_dir)
     processor.start()

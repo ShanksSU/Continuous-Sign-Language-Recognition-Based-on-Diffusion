@@ -47,7 +47,8 @@ class SLRModel(nn.Module):
         self.criterion_init()
         self.num_classes = num_classes
         self.loss_weights = loss_weights
-        self.conv2d = getattr(resnet, c2d_type)()
+        self.conv2d = getattr(resnet, c2d_type)(pretrained=True)
+        # self.conv2d = getattr(resnet, c2d_type)()
         self.conv2d.fc = Identity()
 
         self.glossEmbedder = GlossEmbedder(num_classes, hidden_size)
@@ -58,7 +59,7 @@ class SLRModel(nn.Module):
         self.diffusion_model = DiT(depth=8, hidden_size=1024, num_heads=8, num_classes=num_classes)
 
         self.pe = PositionalEncoding(d_model=hidden_size)
-        self.decoder = CrossAttention_Perciever(dim=hidden_size, num_layer=4)
+        self.deccoder = CrossAttention_Perciever(dim=hidden_size, num_layer=4)
         self.weights = nn.Parameter(torch.ones(2) / 2, requires_grad=True)
 
         self.conv1d = TemporalConv(input_size=512,
@@ -69,7 +70,7 @@ class SLRModel(nn.Module):
         self.decoder = utils.Decode(gloss_dict, num_classes, 'beam')
         self.temporal_model = BiLSTMLayer(rnn_type='LSTM', input_size=hidden_size, hidden_size=hidden_size,
                                           num_layers=2, bidirectional=True)
-
+        
         if weight_norm:
             self.classifier = NormLinear(hidden_size, self.num_classes)
             self.conv1d.fc = NormLinear(hidden_size, self.num_classes)
@@ -78,7 +79,7 @@ class SLRModel(nn.Module):
             self.conv1d.fc = nn.Linear(hidden_size, self.num_classes)
         if share_classifier:
             self.conv1d.fc = self.classifier
-        self.register_backward_hook(self.backward_hook)
+        # self.register_backward_hook(self.backward_hook)
 
     def backward_hook(self, module, grad_input, grad_output):
         for g in grad_input:
@@ -99,44 +100,52 @@ class SLRModel(nn.Module):
         if len(x.shape) == 5:
             # videos
             batch, temp, channel, height, width = x.shape
-            framewise = self.conv2d(x.permute(0, 2, 1, 3, 4), len_x).view(batch, temp, -1).permute(0, 2, 1)  # btc -> bct
+            framewise = self.conv2d(x.permute(0, 2, 1, 3, 4)).view(batch, temp, -1).permute(0, 2, 1)  # btc -> bct
         else:
             # frame-wise features
             framewise = x
 
         conv1d_outputs = self.conv1d(framewise, len_x)
-        # x: T, B, C
-        x = conv1d_outputs['visual_feat']
-        lgt = conv1d_outputs['feat_len']
-
-        tm_outputs = self.temporal_model(x, lgt)
-        visual_cls = tm_outputs['predictions'].mean(dim=0, keepdim=True).transpose(0, 1).squeeze()  # B， D
+        
+        x = conv1d_outputs['visual_feat']   # T, B, C
+        lgt = conv1d_outputs['feat_len']    # B
+        tm_outputs = self.temporal_model(x, lgt)    # BiLSTMLayer
+        visual_cls = tm_outputs['predictions'].mean(dim=0, keepdim=True).transpose(0, 1).squeeze()  # B, D
         visual_cls = self.v2t(visual_cls)
 
         g, gloss_cls = self.glossEmbedder(label, label_lgt)
-        gloss_cls = gloss_cls.squeeze() # B， D
+        gloss_cls = gloss_cls.squeeze() # B, D
         gloss_cls = self.t2v(gloss_cls)
 
         # normalized features
-        image_features = visual_cls / visual_cls.norm(dim=-1, keepdim=True)
-        text_features = gloss_cls / gloss_cls.norm(dim=-1, keepdim=True)
+        image_features = visual_cls / visual_cls.norm(dim=-1, keepdim=True) # B, D
+        text_features = gloss_cls / gloss_cls.norm(dim=-1, keepdim=True)    # B, D
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
         logits_per_image = logit_scale * image_features @ text_features.T  # B, B
         logits_per_text = logit_scale * text_features @ image_features.T  # B, B
-
+        
         z = torch.randn_like(g, requires_grad=False).detach()
-        sample_outputs, loss_step = diffusion.sample(z, tm_outputs['predictions'].transpose(0, 1), lgt, label_lgt, g)
+        # sample_outputs, loss_step = diffusion.sample(z, tm_outputs['predictions'].transpose(0, 1), lgt, label_lgt, g)
+        target_labels = label.int()
+        sample_outputs, loss_step = diffusion.sample(
+            x=z, 
+            visual_feat=tm_outputs['predictions'].transpose(0, 1), # [B, T, D]
+            v_len=lgt, 
+            label_len=label_lgt, 
+            target_labels=target_labels,
+            classifier=self.classifier
+        )
 
         tm_feat = tm_outputs['predictions'].permute(1, 0, 2)  # tbc -> btc
         tm_feat  = self.pe(tm_feat)
+
         predictions, attn = self.deccoder(tm_feat, sample_outputs, sample_outputs, label_lgt, lgt)
         predictions = predictions.permute(1, 0, 2)  # btc -> tbc
         outputs1 = self.classifier(tm_outputs['predictions'])
         outputs2 = self.classifier(predictions)
         outputs = self.weights[0] * outputs1 + self.weights[1] * outputs2
-
         pred = None if self.training \
             else self.decoder.decode(outputs, lgt, batch_first=False, probs=False)
         conv_pred = None if self.training \
@@ -167,8 +176,8 @@ class SLRModel(nn.Module):
         for k, weight in self.loss_weights.items():
             if k == 'ConvCTC':
                 loss_temp = self.loss['CTCLoss'](ret_dict["conv_logits"].log_softmax(-1),
-                                         label.cpu().int(), ret_dict["feat_len"].cpu().int(),
-                                         label_lgt.cpu().int()).mean()
+                                label.cpu().int(), ret_dict["feat_len"].cpu().int(),
+                                label_lgt.cpu().int()).mean()
                 if np.isinf(loss_temp.item()) or np.isnan(loss_temp.item()):
                     continue
                 loss += weight * loss_temp

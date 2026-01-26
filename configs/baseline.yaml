@@ -1,5 +1,5 @@
 feeder: dataset.dataloader_video.BaseFeeder
-phase: test
+phase: train
 # dataset: CSL-Daily
 # dataset: CSL
 # dataset: phoenix2014-T
@@ -32,7 +32,7 @@ loss_weights:
   # SeqMse: 1.0
   # ConvMse: 1.0
 #  Contras: 0.5
-load_weights: '/home/lyn/GX/dev_16.10_epoch2_model_17.9.pt'
+# load_weights: '/home/lyn/GX/dev_16.10_epoch2_model_17.9.pt'
 
 
 optimizer_args:
