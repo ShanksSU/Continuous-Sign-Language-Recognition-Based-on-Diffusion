@@ -90,7 +90,7 @@ class GaussianDiffusion(nn.Module):
             )
 
     @torch.no_grad()
-    def sample(self, x, y, v_len, label_len, g, use_ema=False):
+    def sample_source_code(self, x, y, v_len, label_len, g, use_ema=False):
         alpha = 1e-4
         b, _, _ = x.shape
         weights = generate_linear_schedule(self.num_timesteps, 0.01, 0.0001)
@@ -101,12 +101,44 @@ class GaussianDiffusion(nn.Module):
 
             if t > 0:
                 x += extract(self.sigma, t_batch, x.shape) * torch.randn_like(x)
+            label_len = label_len.long()
+            v_len = v_len.long()
             loss += self.CTC_loss(x, y, label_len, v_len) * weights[t] + Glossloss()(x, y) * weights[t]  # 计算RSM与GFE
+            
         sample_output = alpha * x
         # Calculate the total loss
         loss = loss / self.num_timesteps
         return sample_output, loss
 
+    def sample(self, x, visual_feat, v_len, label_len, target_labels, classifier, use_ema=False):
+        b, _, _ = x.shape
+        weights = generate_linear_schedule(self.num_timesteps, 0.0001, 0.01) # delta_t: 10^-4 to 10^-2
+        loss = 0
+        loss_dict = {"ctc": 0.0, "gfe": 0.0}
+        # 迭代去噪過程 (T -> 0)
+        for t in range(self.num_timesteps - 1, -1, -1):
+            t_batch = torch.tensor([t], device=x.device).repeat(b)
+            x = self.remove_noise(x, t_batch, visual_feat, v_len, label_len, use_ema)
+            if t > 0:
+                x += extract(self.sigma, t_batch, x.shape) * torch.randn_like(x)
+            logits = classifier(x)
+            log_probs = logits.log_softmax(dim=-1).permute(1, 0, 2)
+            ctc_loss = self.CTC_loss(
+                log_probs, 
+                target_labels.cpu(),
+                label_len.cpu().int(), 
+                label_len.cpu().int()
+            )
+            weighted_ctc = ctc_loss.mean() * weights[t]
+            gfe_loss_val = Glossloss(tau=0.15)(visual_feat, x)
+            weighted_gfe = gfe_loss_val * weights[t]
+            loss += (weighted_ctc + weighted_gfe)
+            loss_dict["ctc"] += weighted_ctc
+            loss_dict["gfe"] += weighted_gfe
+        sample_output = x
+        loss = loss / self.num_timesteps 
+        return sample_output, loss
+    
     def perturb_x(self, x, t, noise):
         return (
             extract(self.sqrt_alphas_cumprod, t,  x.shape) * x +
