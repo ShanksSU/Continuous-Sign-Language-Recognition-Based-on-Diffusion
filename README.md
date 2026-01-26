@@ -87,3 +87,14 @@ Please ensure the downloaded files are placed in the ./pretrain_models/MBart_tri
 The priorities of configuration files are: command line > config file > default values of argparse. To train the SLR model, run the command below:
 
 `python main.py --config ./config/baseline.yaml --device your_device`
+
+### Training Status
+
+After refactoring, the model trains stably with consistent loss reduction. 
+
+**Training Progress:**
+![Training Process](./assets/training_process.PNG)
+
+**GPU Memory Usage (nvidia-smi):**
+The following snapshot shows the VRAM consumption during training (tested on NVIDIA H100):
+![GPU Usage](./assets/gpu_usage.PNG)
