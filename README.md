@@ -86,7 +86,7 @@ Please ensure the downloaded files are placed in the ./pretrain_models/MBart_tri
 
 The priorities of configuration files are: command line > config file > default values of argparse. To train the SLR model, run the command below:
 
-`python main.py --config ./config/baseline.yaml --device your_device`
+`python main.py --configs ./config/baseline.yaml --device your_device`
 
 ### Training Status
 
